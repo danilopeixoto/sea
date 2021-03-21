@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -33,7 +33,6 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
 
 SEA_NAMESPACE_BEGIN
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -29,11 +29,12 @@
 #include <sea/bvh.h>
 #include <sea/scene.h>
 #include <sea/renderer.h>
+#include <sea/denoiser.h>
 
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <cmath>
 
 #include <glm/trigonometric.hpp>
 
@@ -153,64 +154,63 @@ __host__ GLvoid window_render_screen(Window * window) {
     glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
-__host__ GLvoid window_update_kernel_parameters(Window * window) {
-    window->block_size.x = 32;
-    window->block_size.y = 32;
-    window->block_size.z = 1;
-
-    window->grid_size.x = (GLuint)std::ceilf((GLfloat)window->width / (GLfloat)window->block_size.x);
-    window->grid_size.y = (GLuint)std::ceilf((GLfloat)window->height / (GLfloat)window->block_size.y);
-    window->grid_size.z = 1;
-}
 __host__ GLvoid window_initialize(Window * window) {
-    window_create_screen(window);
-    window_update_kernel_parameters(window);
+	window_create_screen(window);
 
-    BSDF * light_material;
-    cudaMallocManaged(&light_material, sizeof(BSDF));
+	BSDF * white_diffuse_material;
+	cudaMallocManaged(&white_diffuse_material, sizeof(BSDF));
 
-    light_material->type = BSDF_LIGHT;
-    light_material->intensity = 20.0f;
-    light_material->color = glm::vec3(1.0f, 0.65f, 0.3f);
-    light_material->index_of_refraction = 1.0f;
+	white_diffuse_material->type = BSDF_DIFFUSE;
+	white_diffuse_material->intensity = 1.0f;
+	white_diffuse_material->color = glm::vec3(1.0f, 1.0f, 1.0f);
+	white_diffuse_material->index_of_refraction = 1.0f;
 
-    BSDF * white_diffuse_material;
-    cudaMallocManaged(&white_diffuse_material, sizeof(BSDF));
+	size_t scene_version = 0;
+	std::string scene_name("res/meshes/cornell_box");
+	std::string scene_path = scene_name + std::to_string(scene_version) + ".obj";
 
-    white_diffuse_material->type = BSDF_DIFFUSE;
-    white_diffuse_material->intensity = 1.0f;
-    white_diffuse_material->color = glm::vec3(1.0f, 1.0f, 1.0f);
-    white_diffuse_material->index_of_refraction = 1.0f;
+	window->scene = scene_load(scene_path.c_str(), white_diffuse_material);
 
-    BSDF * red_diffuse_material;
-    cudaMallocManaged(&red_diffuse_material, sizeof(BSDF));
+	if (window->scene == nullptr) {
+		std::cerr << "Error: cannot load scene from " << scene_path << " path." << std::endl;
 
-    red_diffuse_material->type = BSDF_DIFFUSE;
-    red_diffuse_material->intensity = 1.0f;
-    red_diffuse_material->color = glm::vec3(0.65f, 0.065f, 0.05f);
-    red_diffuse_material->index_of_refraction = 1.0f;
+		cudaFree(white_diffuse_material);
+		glfwSetWindowShouldClose(window->handle, GLFW_TRUE);
 
-    BSDF * green_diffuse_material;
-    cudaMallocManaged(&green_diffuse_material, sizeof(BSDF));
+		return;
+	}
 
-    green_diffuse_material->type = BSDF_DIFFUSE;
-    green_diffuse_material->intensity = 1.0f;
-    green_diffuse_material->color = glm::vec3(0.14f, 0.45f, 0.2f);
-    green_diffuse_material->index_of_refraction = 1.0f;
+	BSDF * light_material;
+	cudaMallocManaged(&light_material, sizeof(BSDF));
 
-    BSDF * glass_material;
-    cudaMallocManaged(&glass_material, sizeof(BSDF));
+	light_material->type = BSDF_LIGHT;
+	light_material->intensity = 20.0f;
+	light_material->color = glm::vec3(1.0f, 0.65f, 0.3f);
+	light_material->index_of_refraction = 1.0f;
 
-    glass_material->type = BSDF_GLASS;
-    glass_material->intensity = 1.0f;
-    glass_material->color = glm::vec3(1.0f, 1.0f, 1.0f);
-    glass_material->index_of_refraction = 1.55f;
+	BSDF * red_diffuse_material;
+	cudaMallocManaged(&red_diffuse_material, sizeof(BSDF));
 
-    size_t scene_version = 0;
-    std::string scene_name("res/meshes/cornell_box");
-    std::string scene_path = scene_name + std::to_string(scene_version) + ".obj";
+	red_diffuse_material->type = BSDF_DIFFUSE;
+	red_diffuse_material->intensity = 1.0f;
+	red_diffuse_material->color = glm::vec3(0.65f, 0.065f, 0.05f);
+	red_diffuse_material->index_of_refraction = 1.0f;
 
-    window->scene = scene_load(scene_path.c_str(), white_diffuse_material);
+	BSDF * green_diffuse_material;
+	cudaMallocManaged(&green_diffuse_material, sizeof(BSDF));
+
+	green_diffuse_material->type = BSDF_DIFFUSE;
+	green_diffuse_material->intensity = 1.0f;
+	green_diffuse_material->color = glm::vec3(0.14f, 0.45f, 0.2f);
+	green_diffuse_material->index_of_refraction = 1.0f;
+
+	BSDF * glass_material;
+	cudaMallocManaged(&glass_material, sizeof(BSDF));
+
+	glass_material->type = BSDF_GLASS;
+	glass_material->intensity = 1.0f;
+	glass_material->color = glm::vec3(1.0f, 1.0f, 1.0f);
+	glass_material->index_of_refraction = 1.55f;
 
     Triangle * shape = nullptr;
 
@@ -345,22 +345,47 @@ __host__ GLvoid window_initialize(Window * window) {
     window->camera = camera_create(
         glm::radians(45.0f), 15.0f, 0.0f, (GLfloat)window->width, (GLfloat)window->height);
 
-    window->renderer = renderer_create(window->width, window->height, 1, 1, 1, 2.2f);
+	window->renderer = renderer_create(window->width, window->height, 4, 1, 1, 2.2f);
+	window->denoiser = denoiser_create(LDR);
+
+	denoiser_update(window->denoiser, window->renderer);
 }
 __host__ GLvoid window_render(Window * window) {
     camera_update_view_matrix(window->camera, window->translation, window->rotation);
 
     if (!window->progressive_rendering) {
-        window->renderer->progressive_time = 0;
+		window->renderer->progressive_time = 0;
         window->progressive_rendering = true;
     }
 
-    GLfloat t = (GLfloat)window->renderer->progressive_time;
+	curandState * random_state;
+	cudaMallocManaged(&random_state, window->width * window->height * sizeof(curandState));
+
+	GLfloat t = (GLfloat)window->renderer->progressive_time;
     window->renderer->accumulated = t / (t + 1.0f);
 
-    renderer_render<<<window->grid_size, window->block_size>>>(window->scene, window->camera, window->renderer);
+	dim3 block_size, grid_size;
 
-    cudaDeviceSynchronize();
+	renderer_compute_kernel_parameters(window->renderer, renderer_initialize, block_size, grid_size);
+	renderer_initialize<<<grid_size, block_size>>>(window->renderer, random_state);
+	cudaDeviceSynchronize();
+
+	renderer_compute_kernel_parameters(window->renderer, renderer_render_passes, block_size, grid_size);
+	renderer_render_passes<<<grid_size, block_size>>>(window->scene, window->camera, window->renderer, random_state);
+	cudaDeviceSynchronize();
+
+	renderer_compute_kernel_parameters(window->renderer, renderer_render, block_size, grid_size);
+    renderer_render<<<grid_size, block_size>>>(window->scene, window->camera, window->renderer, random_state);
+	cudaDeviceSynchronize();
+
+	cudaFree(random_state);
+
+	denoiser_denoise(window->denoiser, window->renderer, 1.0f);
+
+	renderer_compute_kernel_parameters(window->renderer, renderer_accumulate, block_size, grid_size);
+	renderer_accumulate<<<grid_size, block_size>>>(window->renderer);
+	cudaDeviceSynchronize();
+
     window->renderer->time++;
     window->renderer->progressive_time++;
 
@@ -397,9 +422,9 @@ __host__ GLvoid window_resize(Window * window, GLuint width, GLuint height) {
     glViewport(0, 0, width, height);
 
     window_resize_screen(window);
-    window_update_kernel_parameters(window);
 
-    renderer_update(window->renderer, window->camera, width, height);
+	renderer_update(window->renderer, window->camera, width, height);
+	denoiser_update(window->denoiser, window->renderer);
 
     window->progressive_rendering = false;
 }
@@ -414,6 +439,21 @@ __host__ GLvoid window_keyboard(Window * window, GLuint key, GLuint action) {
             window->renderer->maximum_depth ^= 9;
             window->progressive_rendering = false;
             break;
+		case GLFW_KEY_A:
+			window->renderer->pass = 1;
+			window->renderer->image = window->renderer->albedo_pass;
+			window->progressive_rendering = false;
+			break;
+		case GLFW_KEY_N:
+			window->renderer->pass = 2;
+			window->renderer->image = window->renderer->normal_pass;
+			window->progressive_rendering = false;
+			break;
+		case GLFW_KEY_R:
+			window->renderer->pass = 0;
+			window->renderer->image = window->renderer->radiance_pass;
+			window->progressive_rendering = false;
+			break;
         case GLFW_KEY_ESCAPE:
             glfwSetWindowShouldClose(window->handle, GLFW_TRUE);
             break;
@@ -448,11 +488,11 @@ __host__ GLvoid window_mouse_scroll(Window * window, GLfloat dx, GLfloat dy) {
     window->progressive_rendering = false;
 }
 
-__host__ Window * window_create(const GLchar * title, GLuint width, GLuint height) {
+__host__ Window * window_create(const GLchar * title, GLuint width, GLuint height, GLuint device_id) {
     Window * window = new Window;
 
     window->handle = nullptr;
-
+	
     window->scene = nullptr;
     window->camera = nullptr;
     window->renderer = nullptr;
@@ -460,6 +500,7 @@ __host__ Window * window_create(const GLchar * title, GLuint width, GLuint heigh
     window->title = title;
     window->width = width;
     window->height = height;
+	window->device_id = device_id;
 
     window->mouse_button = -1;
     window->mouse_position.x = 0.0f;
@@ -473,9 +514,10 @@ __host__ Window * window_create(const GLchar * title, GLuint width, GLuint heigh
 }
 __host__ GLvoid window_delete(Window * window) {
     if (window) {
-        scene_delete(window->scene);
+		scene_delete(window->scene);
         camera_delete(window->camera);
         renderer_delete(window->renderer);
+		denoiser_delete(window->denoiser);
 
         delete window;
         window = nullptr;
@@ -483,7 +525,7 @@ __host__ GLvoid window_delete(Window * window) {
 }
 
 __host__ GLvoid window_show(Window * window) {
-    if (!glfwInit())
+	if (!glfwInit())
         return;
 
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -540,23 +582,25 @@ __host__ GLvoid window_show(Window * window) {
         glfwSetWindowPos(window->handle, x, y);
 
         glewExperimental = GL_TRUE;
+		
+		if (glewInit() == GLEW_OK) {
+			window_initialize(window);
 
-        if (glewInit() == GLEW_OK) {
-            window_initialize(window);
-
-            while (!glfwWindowShouldClose(window->handle)) {
-                window_render(window);
+			while (!glfwWindowShouldClose(window->handle)) {
+				window_render(window);
 
                 glfwSwapBuffers(window->handle);
                 glfwPollEvents();
             }
         }
-
-        window_close(window);
     }
+
+	window_close(window);
 }
 __host__ GLvoid window_close(Window * window) {
-    glfwDestroyWindow(window->handle);
+    if (window->handle)
+		glfwDestroyWindow(window->handle);
+
     glfwTerminate();
 }
 

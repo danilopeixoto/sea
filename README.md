@@ -18,6 +18,6 @@ Project requires:
 
 Copyright and License
 ---------------------
-Copyright &copy; 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+Copyright &copy; 2020, Danilo Peixoto. All rights reserved.
 
-Project developed under the [BSD-3-Clause license](LICENSE).
+Project developed under the [BSD-3-Clause license](LICENSE.md).

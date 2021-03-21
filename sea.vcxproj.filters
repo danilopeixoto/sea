@@ -18,14 +18,17 @@
     <None Include="README.md">
       <Filter>Other Files</Filter>
     </None>
-    <None Include="LICENSE">
-      <Filter>Other Files</Filter>
-    </None>
     <None Include="res\shaders\texture.frag">
       <Filter>Resource Files</Filter>
     </None>
     <None Include="res\shaders\texture.vert">
       <Filter>Resource Files</Filter>
+    </None>
+    <None Include="LICENSE.md">
+      <Filter>Other Files</Filter>
+    </None>
+    <None Include=".gitignore">
+      <Filter>Other Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
@@ -50,6 +53,9 @@
     <ClInclude Include="include\sea\renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\sea\denoiser.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="src\window.cu">
@@ -68,6 +74,9 @@
       <Filter>Source Files</Filter>
     </CudaCompile>
     <CudaCompile Include="src\utility.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+    <CudaCompile Include="src\denoiser.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
   </ItemGroup>

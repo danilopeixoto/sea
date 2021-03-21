@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
+#include <curand_kernel.h>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -44,11 +44,13 @@ SEA_NAMESPACE_BEGIN
 struct Scene;
 struct Camera;
 struct Renderer;
+struct Denoiser;
 
 struct Window {
     const GLchar * title;
     GLuint width;
     GLuint height;
+	GLuint device_id;
 
     GLFWwindow * handle;
 
@@ -56,8 +58,7 @@ struct Window {
     Camera * camera;
     Renderer * renderer;
 
-    dim3 block_size;
-    dim3 grid_size;
+	Denoiser * denoiser;
 
     GLint mouse_button;
     glm::vec2 mouse_position;
@@ -77,7 +78,6 @@ __host__ GLboolean window_load_shader(const GLchar *, GLenum, GLuint &);
 __host__ GLboolean window_create_shader(const GLchar *, GLuint &);
 __host__ GLvoid window_delete_shader(GLuint &);
 
-__host__ GLvoid window_update_kernel_parameters(Window *);
 __host__ GLvoid window_initialize(Window *);
 __host__ GLvoid window_render(Window *);
 
@@ -91,7 +91,7 @@ __host__ GLvoid window_mouse_button(Window *, GLuint, GLuint);
 __host__ GLvoid window_mouse_cursor(Window *, GLfloat, GLfloat);
 __host__ GLvoid window_mouse_scroll(Window *, GLfloat, GLfloat);
 
-__host__ Window * window_create(const GLchar *, GLuint, GLuint);
+__host__ Window * window_create(const GLchar *, GLuint, GLuint, GLuint);
 __host__ GLvoid window_delete(Window *);
 
 __host__ GLvoid window_show(Window *);

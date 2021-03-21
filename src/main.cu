@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -31,7 +31,7 @@
 SEA_NAMESPACE_USING
 
 int main(int argc, char ** argv) {
-    Window * window = window_create("Sea", 500, 500);
+    Window * window = window_create("Sea", 500, 500, 0);
 
     window_show(window);
     window_delete(window);

@@ -25,21 +25,50 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef SEA_GLOBAL_H
-#define SEA_GLOBAL_H
+#ifndef SEA_DENOISER_H
+#define SEA_DENOISER_H
 
-#define SEA_NAME "Sea"
-#define SEA_VERSION "1.0.0"
-#define SEA_AUTHOR "Danilo Peixoto and Débora Bacelar"
-#define SEA_COPYRIGHT "Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved."
-#define SEA_LICENSE "BSD-3-Clause"
+#include <sea/global.h>
 
-#define SEA_VERSION_MAJOR 1
-#define SEA_VERSION_MINOR 0
-#define SEA_VERSION_PATCH 0
+#include <cuda.h>
+#include <cuda_runtime.h>
 
-#define SEA_NAMESPACE_BEGIN namespace sea {
-#define SEA_NAMESPACE_END };
-#define SEA_NAMESPACE_USING using namespace sea;
+#include <optix.h>
+#include <optix_stubs.h>
+
+SEA_NAMESPACE_BEGIN
+
+struct Renderer;
+
+enum DenoiserType {
+	None = 0x0,
+	LDR,
+	HDR
+};
+
+struct Denoiser {
+	DenoiserType type;
+
+	CUcontext cuda_context;
+	OptixDeviceContextOptions options;
+	OptixDeviceContext context;
+
+	OptixDenoiserOptions denoiser_options;
+	OptixDenoiserModelKind model;
+	OptixDenoiser denoiser_handler;
+
+	size_t state_size;
+	size_t scratch_size;
+
+	CUdeviceptr state;
+};
+
+__host__ Denoiser * denoiser_create(DenoiserType);
+__host__ void denoiser_update(Denoiser *, const Renderer *);
+__host__ void denoiser_delete(Denoiser *);
+
+__host__ void denoiser_denoise(Denoiser *, Renderer *, float);
+
+SEA_NAMESPACE_END
 
 #endif

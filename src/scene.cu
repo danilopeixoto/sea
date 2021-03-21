@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -114,13 +114,12 @@ __host__ __device__ void triangle_shader_globals(const Triangle * triangle,
 
     float w = 1.0f - intersection.u - intersection.v;
 
-    shader_globals.geometric_normal = glm::normalize(
+	shader_globals.geometric_normal = triangle->normal;
+
+    shader_globals.normal = glm::normalize(
         triangle->vertices.v0.normal * w +
         triangle->vertices.v1.normal * intersection.u +
         triangle->vertices.v2.normal * intersection.v);
-
-    float d = glm::dot(ray.direction, shader_globals.geometric_normal);
-    shader_globals.normal = d < 0.0f ? shader_globals.geometric_normal : -shader_globals.geometric_normal;
 
     shader_globals.uv =
         triangle->vertices.v0.uv * w +
@@ -174,19 +173,19 @@ __host__ void camera_update_view_matrix(
 
     camera->view_matrix = rotation_around_axis_matrix * camera->view_matrix;
 }
-__host__ __device__ void camera_generate_ray(
-    const Camera * camera, float x, float y, size_t & seed, Ray & ray) {
+__device__ void camera_generate_ray(
+    const Camera * camera, float x, float y, curandState & state, Ray & ray) {
     glm::vec4 origin(0.0f, 0.0f, 0.0f, 1.0f);
 
-    if (camera->aperture > SEA_BIAS) {
+    if (camera->aperture > SEA_EPSILON) {
         float radius = camera->focal_length / camera->aperture * 0.5f;
-        glm::vec2 sample = random_uniform_2D(seed);
+        glm::vec2 sample = random_uniform_2D(state);
 
         origin.x = radius * sample.x;
         origin.y = radius * sample.y;
     }
 
-    glm::vec2 sample = random_uniform_2D(seed);
+    glm::vec2 sample = random_uniform_2D(state);
     float scale = camera->focal_length * glm::tan(camera->field_of_view * 0.5f);
 
     glm::vec4 pixel;
@@ -308,8 +307,11 @@ __host__ Scene * scene_load(const char * filename, BSDF * bsdf) {
         glm::vec3 e0 = triangle->vertices.v1.position - triangle->vertices.v0.position;
         glm::vec3 e1 = triangle->vertices.v2.position - triangle->vertices.v0.position;
 
-        glm::vec3 n = glm::cross(e0, e1);
-        triangle->surface_area = glm::length(n);
+		triangle->normal = glm::cross(e0, e1);
+        triangle->surface_area = glm::length(triangle->normal);
+
+		triangle->normal /= triangle->surface_area;
+		triangle->surface_area *= 0.5f;
 
         try {
             size_t normal_index0 = normal_indices.at(i * 3);
@@ -321,14 +323,10 @@ __host__ Scene * scene_load(const char * filename, BSDF * bsdf) {
             triangle->vertices.v2.normal = normals.at(normal_index2);
         }
         catch (const std::out_of_range & exception) {
-            n /= triangle->surface_area;
-
-            triangle->vertices.v0.normal = n;
-            triangle->vertices.v1.normal = n;
-            triangle->vertices.v2.normal = n;
+            triangle->vertices.v0.normal = triangle->normal;
+            triangle->vertices.v1.normal = triangle->normal;
+            triangle->vertices.v2.normal = triangle->normal;
         }
-
-        triangle->surface_area /= 2.0f;
 
         try {
             size_t texture_index0 = texture_indices.at(i * 3);

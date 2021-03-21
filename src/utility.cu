@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -38,24 +38,14 @@
 
 SEA_NAMESPACE_BEGIN
 
-__host__ __device__ size_t random_uniform_uinteger(size_t & seed) {
-    uint32_t s = (uint32_t)seed;
-
-    s = (s ^ 61u) ^ (s >> 16u);
-    s *= 9u;
-    s = s ^ (s >> 4u);
-    s *= 0x27d4eb2du;
-    s = s ^ (s >> 15);
-
-    seed = (size_t)s;
-
-    return seed;
+__device__ size_t random_uniform_uinteger(curandState & state) {
+	return (size_t)curand(&state);
 }
-__host__ __device__ float random_uniform_1D(size_t & seed) {
-    return (float)random_uniform_uinteger(seed) / ((float)UINT32_MAX + 1.0f);
+__device__ float random_uniform_1D(curandState & state) {
+    return curand_uniform(&state);
 }
-__host__ __device__ glm::vec2 random_uniform_2D(size_t & seed) {
-    return glm::vec2(random_uniform_1D(seed), random_uniform_1D(seed));
+__device__ glm::vec2 random_uniform_2D(curandState & state) {
+    return glm::vec2(random_uniform_1D(state), random_uniform_1D(state));
 }
 __host__ __device__ glm::vec2 random_uniform_disk(const glm::vec2 & sample) {
     float radius = glm::sqrt(sample.x);
@@ -68,7 +58,7 @@ __host__ __device__ glm::vec3 random_uniform_triangle(const glm::vec2 & sample) 
     float u = 1.0f - s;
     float v = s * sample.y;
 
-    return glm::vec3(u, v, 1.0 - u - v);
+    return glm::vec3(u, v, 1.0f - u - v);
 }
 __host__ __device__ glm::vec3 random_uniform_cosine_weighted_hemisphere(const glm::vec2 & sample) {
     float s = glm::sqrt(sample.x);
@@ -80,7 +70,7 @@ __host__ __device__ glm::vec3 random_uniform_cosine_weighted_hemisphere(const gl
 __host__ __device__ void world_coordinate_system(
     const glm::vec3 & sample, const ShaderGlobals & shader_globals, glm::vec3 & direction) {
     const glm::vec3 & w = shader_globals.normal;
-    glm::vec3 axis = glm::abs(w.x) > SEA_BIAS ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 axis = glm::abs(w.x) > SEA_EPSILON ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
     glm::vec3 u = glm::normalize(glm::cross(axis, w));
     glm::vec3 v = glm::cross(w, u);
 

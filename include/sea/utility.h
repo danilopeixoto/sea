@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
+#include <curand_kernel.h>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -64,9 +64,9 @@ struct Box {
     glm::vec3 maximum;
 };
 
-__host__ __device__ size_t random_uniform_uinteger(size_t &);
-__host__ __device__ float random_uniform_1D(size_t &);
-__host__ __device__ glm::vec2 random_uniform_2D(size_t &);
+__device__ size_t random_uniform_uinteger(curandState &);
+__device__ float random_uniform_1D(curandState &);
+__device__ glm::vec2 random_uniform_2D(curandState &);
 __host__ __device__ glm::vec2 random_uniform_disk(const glm::vec2 &);
 __host__ __device__ glm::vec3 random_uniform_triangle(const glm::vec2 &);
 __host__ __device__ glm::vec3 random_uniform_cosine_weighted_hemisphere(const glm::vec2 &);

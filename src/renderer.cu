@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -30,9 +30,6 @@
 #include <sea/scene.h>
 #include <sea/math.h>
 
-#include <cuda.h>
-#include <device_launch_parameters.h>
-
 #include <glm/trigonometric.hpp>
 #include <glm/vec2.hpp>
 #include <glm/common.hpp>
@@ -40,34 +37,6 @@
 #include <cmath>
 
 SEA_NAMESPACE_BEGIN
-
-__host__ __device__ void local_coordinate_system(
-    const glm::vec3 & sample, const ShaderGlobals & shader_globals, glm::vec3 & direction) {
-    const glm::vec3 & n = shader_globals.normal;
-
-    glm::vec3 tangent_v;
-
-    if (glm::abs(n.x) > glm::abs(n.y)) {
-        float s = 1.0f / glm::sqrt(n.x * n.x + n.z * n.z);
-
-        tangent_v.x = n.z * s;
-        tangent_v.y = 0.0f;
-        tangent_v.z = -n.x * s;
-    }
-    else {
-        float s = 1.0f / glm::sqrt(n.y * n.y + n.z * n.z);
-
-        tangent_v.x = 0.0f;
-        tangent_v.y = -n.z * s;
-        tangent_v.z = n.y * s;
-    }
-
-    glm::vec3 tangent_u = glm::cross(n, tangent_v);
-
-    direction.x = sample.x * tangent_u.x + sample.y * n.x + sample.z * tangent_v.x;
-    direction.y = sample.x * tangent_u.y + sample.y * n.y + sample.z * tangent_v.y;
-    direction.z = sample.x * tangent_u.z + sample.y * n.z + sample.z * tangent_v.z;
-}
 
 __host__ Image * image_create(size_t width, size_t height) {
     Image * image;
@@ -113,60 +82,145 @@ __host__ Renderer * renderer_create(size_t width, size_t height,
     renderer->camera_samples = camera_samples;
     renderer->light_samples = light_samples;
     renderer->maximum_depth = maximum_depth;
+	renderer->pass = 0;
     renderer->time = 0;
     renderer->progressive_time = 0;
     renderer->accumulated = 0.0f;
 
     renderer->gamma = gamma;
 
-    renderer->image = image_create(width, height);;
+	renderer->frame_radiance_pass = image_create(width, height);
+    renderer->radiance_pass = image_create(width, height);
+	renderer->albedo_pass = image_create(width, height);
+	renderer->normal_pass = image_create(width, height);
+
+	renderer->image = renderer->radiance_pass;
 
     return renderer;
 }
 __host__ void renderer_update(Renderer * renderer, Camera * camera, size_t width, size_t height) {
-    camera->film.width = (float)width;
+	camera->film.width = (float)width;
     camera->film.height = (float)height;
 
-    image_delete(renderer->image);
-    renderer->image = image_create(width, height);
+	image_delete(renderer->frame_radiance_pass);
+    image_delete(renderer->radiance_pass);
+	image_delete(renderer->albedo_pass);
+	image_delete(renderer->normal_pass);
+
+	renderer->frame_radiance_pass = image_create(width, height);
+	renderer->radiance_pass = image_create(width, height);
+	renderer->albedo_pass = image_create(width, height);
+	renderer->normal_pass = image_create(width, height);
+
+	Image * passes[3] = {
+		renderer->radiance_pass,
+		renderer->albedo_pass,
+		renderer->normal_pass };
+
+	renderer->image = passes[renderer->pass];
 }
 __host__ void renderer_delete(Renderer * renderer) {
     if (renderer) {
-        image_delete(renderer->image);
+		image_delete(renderer->frame_radiance_pass);
+        image_delete(renderer->radiance_pass);
+		image_delete(renderer->albedo_pass);
+		image_delete(renderer->normal_pass);
+
         cudaFree(renderer);
 
         renderer = nullptr;
     }
 }
-__global__ void renderer_render(const Scene * scene, Camera * camera, Renderer * renderer) {
-    size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-    size_t j = blockIdx.y * blockDim.y + threadIdx.y;
+__global__ void renderer_initialize(const Renderer * renderer, curandState * random_state) {
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t j = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (i < renderer->image->width && j < renderer->image->height) {
-        size_t seed = renderer->time + (i + j * renderer->image->width) * 100;
-        glm::vec3 color(0.0f, 0.0f, 0.0f);
-
-        for (size_t k = 0; k < renderer->camera_samples; k++) {
-            Ray camera_ray;
-            camera_generate_ray(camera, (float)i, (float)j, seed, camera_ray);
-
-            color += renderer_trace(scene, renderer, camera_ray, seed);
-        }
-
-        color /= (float)renderer->camera_samples;
-        color_gamma(color, renderer->gamma);
-        color_saturate(color);
-
-        glm::vec3 previous_color;
-        image_get(renderer->image, i, j, previous_color);
-
-        color = color_mix(color, previous_color, renderer->accumulated);
-
-        image_set(renderer->image, i, j, color);
-    }
+	if (i < renderer->image->width && j < renderer->image->height) {
+		size_t index = i + j * renderer->image->width;
+		curand_init(renderer->time, index, 0, &random_state[index]);
+	}
 }
-__host__ __device__ glm::vec3 renderer_trace(
-    const Scene * scene, const Renderer * renderer, const Ray & ray, size_t & seed) {
+__global__ void renderer_render_passes(const Scene * scene, Camera * camera, Renderer * renderer, curandState * random_state) {
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t j = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i < renderer->image->width && j < renderer->image->height) {
+		size_t index = i + j * renderer->image->width;
+		curandState local_random_state = random_state[index];
+
+		glm::vec3 output_albedo(0.0f, 0.0f, 0.0f);
+		glm::vec3 output_normal(0.0f, 0.0f, 0.0f);
+
+		for (size_t k = 0; k < renderer->camera_samples; k++) {
+			Ray camera_ray;
+			camera_generate_ray(camera, (float)i, (float)j, local_random_state, camera_ray);
+
+			glm::vec3 albedo, normal;
+			renderer_trace_passes(scene, camera, renderer, camera_ray, local_random_state, albedo, normal);
+
+			output_albedo += albedo;
+			output_normal += normal;
+		}
+
+		output_albedo /= (float)renderer->camera_samples;
+		output_normal /= (float)renderer->camera_samples;
+
+		color_gamma(output_albedo, renderer->gamma);
+		color_saturate(output_albedo);
+
+		glm::vec3 previous_albedo, previous_normal;
+
+		image_get(renderer->albedo_pass, i, j, previous_albedo);
+		image_get(renderer->normal_pass, i, j, previous_normal);
+
+		output_albedo = color_mix(output_albedo, previous_albedo, renderer->accumulated);
+		output_normal = color_mix(output_normal, previous_normal, renderer->accumulated);
+
+		image_set(renderer->albedo_pass, i, j, output_albedo);
+		image_set(renderer->normal_pass, i, j, output_normal);
+	}
+}
+__device__ void renderer_trace_passes(
+	const Scene * scene, const Camera * camera, const Renderer * renderer, const Ray & ray, curandState & state,
+	glm::vec3 & albedo, glm::vec3 & normal) {
+	Intersection intersection;
+
+	if (!scene_intersects_ray(scene, ray, intersection)) {
+		albedo = glm::vec3(0.0f, 0.0f, 0.0f);
+		normal = glm::vec3(0.0f, 0.0f, 0.0f);
+	}
+	else {
+		Triangle * triangle = scene->triangle_list[intersection.index];
+		BSDF * bsdf = triangle->bsdf;
+
+		ShaderGlobals shader_globals;
+		triangle_shader_globals(triangle, ray, intersection, shader_globals);
+
+		albedo = SEA_INV_PI * bsdf->intensity * bsdf->color;
+		normal = glm::inverse(camera->view_matrix) * glm::vec4(shader_globals.normal, 0.0f);
+	}
+}
+__global__ void renderer_render(const Scene * scene, Camera * camera, Renderer * renderer, curandState * random_state) {
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t j = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i < renderer->image->width && j < renderer->image->height) {
+		size_t index = i + j * renderer->image->width;
+		curandState local_random_state = random_state[index];
+
+		Ray camera_ray;
+		camera_generate_ray(camera, (float)i, (float)j, local_random_state, camera_ray);
+
+		glm::vec3 radiance = renderer_trace(scene, camera, renderer, camera_ray, local_random_state);
+
+		color_gamma(radiance, renderer->gamma);
+		color_saturate(radiance);
+
+		image_set(renderer->frame_radiance_pass, i, j, radiance);
+	}
+}
+__device__ glm::vec3 renderer_trace(
+	const Scene * scene, const Camera * camera, const Renderer * renderer, const Ray & ray, curandState & state) {
     glm::vec3 radiance(0.0f, 0.0f, 0.0f);
     glm::vec3 weight(1.0f, 1.0f, 1.0f);
 
@@ -186,90 +240,84 @@ __host__ __device__ glm::vec3 renderer_trace(
             break;
         }
         else {
-            ShaderGlobals shader_globals;
-            triangle_shader_globals(triangle, temp_ray, intersection, shader_globals);
+			ShaderGlobals shader_globals;
+			triangle_shader_globals(triangle, temp_ray, intersection, shader_globals);
 
-            if (bsdf->type == BSDF_DIFFUSE) {
-                size_t light_index = random_uniform_uinteger(seed) % scene->light_count;
-                Triangle * light = scene->light_group[light_index];
+            glm::vec3 direct_light(0.0f, 0.0f, 0.0f);
 
-                glm::vec3 direct_light(0.0f, 0.0f, 0.0f);
+            for (size_t j = 0; j < renderer->light_samples; j++) {
+				size_t light_index = random_uniform_uinteger(state) % scene->light_count;
+				Triangle * light = scene->light_group[light_index];
 
-                for (size_t j = 0; j < renderer->light_samples; j++) {
-                    const glm::vec3 & v0 = light->vertices.v0.position;
-                    const glm::vec3 & v1 = light->vertices.v1.position;
-                    const glm::vec3 & v2 = light->vertices.v2.position;
+                const glm::vec3 & v0 = light->vertices.v0.position;
+                const glm::vec3 & v1 = light->vertices.v1.position;
+                const glm::vec3 & v2 = light->vertices.v2.position;
 
-                    glm::vec3 uvw = random_uniform_triangle(random_uniform_2D(seed));
-                    glm::vec3 point = uvw.x * v0 + uvw.y * v1 + uvw.z * v2;
+                glm::vec3 uvw = random_uniform_triangle(random_uniform_2D(state));
+                glm::vec3 point = uvw.x * v0 + uvw.y * v1 + uvw.z * v2;
 
-                    Ray shadow_ray;
-                    shadow_ray.origin = shader_globals.point + SEA_BIAS * shader_globals.normal;
-                    shadow_ray.direction = point - shader_globals.point;
+                Ray shadow_ray;
+                shadow_ray.origin = shader_globals.point + SEA_BIAS * shader_globals.normal;
+                shadow_ray.direction = point - shader_globals.point;
 
-                    float squared_light_distance = glm::dot(shadow_ray.direction, shadow_ray.direction);
-                    shadow_ray.direction /= glm::sqrt(squared_light_distance);
+                float squared_light_distance = glm::dot(shadow_ray.direction, shadow_ray.direction);
+                shadow_ray.direction /= glm::sqrt(squared_light_distance);
 
-                    Intersection shadow_intersection;
-                    scene_intersects_ray(scene, shadow_ray, shadow_intersection);
+                Intersection shadow_intersection;
+                scene_intersects_ray(scene, shadow_ray, shadow_intersection);
 
-                    if (shadow_intersection.hit && scene->triangle_list[shadow_intersection.index] == light) {
-                        ShaderGlobals light_shader_globals;
-                        triangle_shader_globals(light, shadow_ray, shadow_intersection, light_shader_globals);
+                if (shadow_intersection.hit && scene->triangle_list[shadow_intersection.index] == light) {
+					ShaderGlobals light_shader_globals;
+                    triangle_shader_globals(light, shadow_ray, shadow_intersection, light_shader_globals);
 
-                        glm::vec3 diffuse_bsdf = SEA_INV_PI * bsdf->intensity * bsdf->color;
-                        float cosine = glm::max(0.0f, glm::dot(shader_globals.normal, shadow_ray.direction));
+                    glm::vec3 diffuse_bsdf = SEA_INV_PI * bsdf->intensity * bsdf->color;
+                    float cosine = glm::max(0.0f, glm::dot(shader_globals.normal, shadow_ray.direction));
 
-                        glm::vec3 light_emission = light->bsdf->intensity * light->bsdf->color;
-                        float light_inverse_pdf = light->surface_area;
-                        float light_cosine = glm::max(0.0f, glm::dot(light_shader_globals.normal, -shadow_ray.direction));
+                    glm::vec3 light_emission = light->bsdf->intensity * light->bsdf->color;
+                    float light_inverse_pdf = light->surface_area;
+                    float light_cosine = glm::max(0.0f, glm::dot(light_shader_globals.normal, -shadow_ray.direction));
 
-                        glm::vec3 estimated_light = light_emission * light_inverse_pdf * light_cosine / squared_light_distance;
+                    glm::vec3 estimated_light = light_emission * light_inverse_pdf * light_cosine / squared_light_distance;
 
-                        direct_light += color_multiply(diffuse_bsdf, estimated_light) * cosine;
-                    }
+                    direct_light += color_multiply(diffuse_bsdf, estimated_light) * cosine;
                 }
-
-                direct_light *= (float)scene->light_count / (float)renderer->light_samples;
-                radiance += color_multiply(weight, direct_light);
-
-                temp_ray.origin = shader_globals.point + SEA_BIAS * shader_globals.normal;
-
-                glm::vec3 sample = random_uniform_cosine_weighted_hemisphere(random_uniform_2D(seed));
-                world_coordinate_system(sample, shader_globals, temp_ray.direction);
-
-                weight = color_multiply(weight, bsdf->intensity * bsdf->color);
             }
-            else if (bsdf->type == BSDF_GLASS) {
-                float eta = bsdf->index_of_refraction;
 
-                if (glm::dot(ray.direction, shader_globals.geometric_normal) < 0.0f)
-                    eta = 1.0f / eta;
+            direct_light *= (float)scene->light_count / (float)renderer->light_samples;
+            radiance += color_multiply(weight, direct_light);
 
-                float reflection_coefficient = fresnel(ray.direction, shader_globals.normal, eta);
+            temp_ray.origin = shader_globals.point + SEA_BIAS * shader_globals.normal;
 
-                if (reflection_coefficient == 1.0f || random_uniform_1D(seed) < reflection_coefficient) {
-                    temp_ray.origin = shader_globals.point + SEA_BIAS * shader_globals.normal;
-                    temp_ray.direction = reflect(temp_ray.direction, shader_globals.normal);
-                }
-                else {
-                    temp_ray.origin = shader_globals.point - SEA_BIAS * shader_globals.normal;
-                    temp_ray.direction = refract(temp_ray.direction, shader_globals.normal, eta);
-                }
+            glm::vec3 sample = random_uniform_cosine_weighted_hemisphere(random_uniform_2D(state));
+            world_coordinate_system(sample, shader_globals, temp_ray.direction);
 
-                weight = color_multiply(weight, bsdf->intensity * bsdf->color);
-            }
+            weight = color_multiply(weight, bsdf->intensity * bsdf->color);
 
             float p = glm::max(weight.r, glm::max(weight.g, weight.b));
 
-            if (random_uniform_1D(seed) > p)
+            if (random_uniform_1D(state) > p)
                 break;
 
             weight /= p;
         }
     }
 
-    return radiance;
+	return radiance;
+}
+__global__ void renderer_accumulate(Renderer * renderer) {
+	size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+	size_t j = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (i < renderer->image->width && j < renderer->image->height) {
+		glm::vec3 previous_radiance;
+		image_get(renderer->radiance_pass, i, j, previous_radiance);
+
+		glm::vec3 radiance;
+		image_get(renderer->frame_radiance_pass, i, j, radiance);
+
+		radiance = color_mix(radiance, previous_radiance, renderer->accumulated);
+		image_set(renderer->radiance_pass, i, j, radiance);
+	}
 }
 
 SEA_NAMESPACE_END

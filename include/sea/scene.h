@@ -1,4 +1,4 @@
-// Copyright (c) 2019, Danilo Peixoto and Débora Bacelar. All rights reserved.
+// Copyright (c) 2020, Danilo Peixoto. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
@@ -33,7 +33,7 @@
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <device_launch_parameters.h>
+#include <curand_kernel.h>
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -76,6 +76,7 @@ struct Triangle {
 
     BSDF * bsdf;
     Box bounds;
+	glm::vec3 normal;
     float surface_area;
 };
 
@@ -111,8 +112,8 @@ __host__ __device__ float film_aspect_ratio(const Film &);
 __host__ Camera * camera_create(float, float, float, float, float);
 __host__ void camera_delete(Camera *);
 __host__ void camera_update_view_matrix(Camera *, const glm::vec3 &, const glm::vec3 &);
-__host__ __device__ void camera_generate_ray(
-    const Camera *, float, float, size_t &, Ray &);
+__device__ void camera_generate_ray(
+    const Camera *, float, float, curandState &, Ray &);
 
 __host__ Scene * scene_load(const char *, BSDF *);
 __host__ void scene_group_lights(Scene *);
