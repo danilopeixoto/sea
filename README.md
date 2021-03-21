@@ -11,6 +11,7 @@ Project requires:
 
 * [OpenGL 3.3](https://www.opengl.org)
 * [Cuda Toolkit 9.1](https://developer.nvidia.com/cuda-toolkit)
+* [NVIDIA OptiX SDK](https://developer.nvidia.com/designworks/optix)
 * [OpenMP 2.0](https://www.openmp.org)
 * [The OpenGL Extension Wrangler Library (GLEW)](http://glew.sourceforge.net)
 * [Graphics Library Framework (GLFW)](https://www.glfw.org)
